@@ -1,0 +1,4 @@
+google-generativeai
+pyserial
+opencv-python
+Pillow
