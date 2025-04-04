@@ -1,3 +1,5 @@
+# serial_handler.py
+
 import serial
 import serial.tools.list_ports
 import time
@@ -10,12 +12,11 @@ class SerialHandler:
         self.receive_buffer = [] # Store lines received from serial
         self.stop_read_thread = threading.Event()
         self.read_thread = None
-        self.lock = threading.Lock() # Lock for buffer access if needed, good practice
+        self.lock = threading.Lock() # Lock for buffer access
 
     def list_ports(self):
         """Lists available serial ports."""
         ports = serial.tools.list_ports.comports()
-        # Filter for common USB serial patterns if desired, but list all for now
         return [port.device for port in ports]
 
     def connect(self, port, baudrate=9600, timeout=1):
@@ -25,20 +26,16 @@ class SerialHandler:
             self.disconnect()
         try:
             self.ser = serial.Serial(port, baudrate, timeout=timeout)
-            # Some devices need a brief pause after opening the port
-            time.sleep(2) # Allow time for connection to establish & device init
+            time.sleep(2)
             if self.ser.is_open:
                 print(f"Successfully connected to {port} at {baudrate} baud.")
-                # Clear any old data in buffer
                 self.ser.reset_input_buffer()
                 self.ser.reset_output_buffer()
-                # Start background reader thread
                 self.stop_read_thread.clear()
                 self.read_thread = threading.Thread(target=self._read_serial_loop, daemon=True)
                 self.read_thread.start()
                 return True
             else:
-                # This case might not be reachable if Serial() throws exception on failure
                 print(f"Failed to open serial port {port} (ser.is_open is false).")
                 self.ser = None
                 return False
@@ -55,7 +52,6 @@ class SerialHandler:
         """Disconnects from the serial port and stops the read thread."""
         if self.read_thread and self.read_thread.is_alive():
             self.stop_read_thread.set()
-            # Wait for the thread to finish
             self.read_thread.join(timeout=2)
             if self.read_thread.is_alive():
                 print("Warning: Read thread did not terminate cleanly.")
@@ -69,20 +65,17 @@ class SerialHandler:
         self.ser = None
         self.read_thread = None
         with self.lock:
-            self.receive_buffer = [] # Clear buffer on disconnect
+            self.receive_buffer = []
 
     def send_command(self, command):
         """Sends a command over the serial port. Appends CR ('\r')."""
         if self.ser and self.ser.is_open:
             try:
-                # Scorbot typically uses Carriage Return (CR) termination
-                # Verify this in your manual! Could be '\n' or '\r\n'
                 full_command = command + '\r'
                 encoded_command = full_command.encode('ascii')
                 self.ser.write(encoded_command)
-                # Optional: Flush output buffer to ensure data is sent immediately
-                # self.ser.flush()
-                print(f"[SERIAL_TX]: {command}") # Log sent command
+                # --- CHANGED: Use a consistent prefix for TX ---
+                print(f"--> [SERIAL_TX]: {command}") # Log sent command clearly
                 return True
             except serial.SerialTimeoutException:
                 print(f"ERROR: Timeout writing to serial port for command: {command}")
@@ -98,34 +91,35 @@ class SerialHandler:
             return False
 
     def _read_serial_loop(self):
-        """Continuously reads lines from serial port (run in a background thread)."""
+        """Continuously reads lines from serial port (run in background thread)."""
         print("Starting serial read thread...")
         while not self.stop_read_thread.is_set():
             if not self.ser or not self.ser.is_open:
-                 # Port closed unexpectedly
                  print("Serial port is not open in read loop. Stopping thread.")
                  break
             try:
                 if self.ser.in_waiting > 0:
-                    # Read one line, expecting bytes, decode assuming ASCII
-                    # Use errors='ignore' for robustness against potential noise
                     line_bytes = self.ser.readline()
-                    line = line_bytes.decode('ascii', errors='ignore').strip()
-                    if line: # Only add non-empty lines
-                        # print(f"[SERIAL_RX_RAW]: {line}") # Log raw received line (optional)
-                        with self.lock:
-                            self.receive_buffer.append(line)
+                    # --- CHANGED: Decode carefully and print immediately ---
+                    try:
+                        line = line_bytes.decode('ascii', errors='replace').strip() # Use replace on error
+                        if line:
+                            # --- Print immediately when received ---
+                            print(f"<-- [SERIAL_RX]: {line}")
+                            with self.lock:
+                                self.receive_buffer.append(line)
+                    except UnicodeDecodeError as ude:
+                         # Log if decoding fails completely, even with replace (unlikely)
+                         print(f"<-- [SERIAL_RX_ERROR]: Failed to decode bytes: {line_bytes} - Error: {ude}")
+
             except serial.SerialException as e:
-                # Handle specific serial errors if the port disconnects etc.
                 print(f"ERROR reading from serial port: {e}. Stopping read thread.")
-                self.stop_read_thread.set() # Signal stop
+                self.stop_read_thread.set()
                 break
             except Exception as e:
                  print(f"ERROR: Unexpected error reading serial: {e}")
-                 # Depending on error, might want to stop or continue
-                 time.sleep(0.5) # Pause briefly after unexpected error
-            # Small sleep even if no data, prevents busy-waiting spinning CPU
-            time.sleep(0.05) # 50ms poll interval
+                 time.sleep(0.5)
+            time.sleep(0.05) # Reduce CPU usage
 
         print("Stopping serial read thread.")
 

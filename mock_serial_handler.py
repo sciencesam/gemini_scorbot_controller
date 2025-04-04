@@ -1,3 +1,4 @@
+# mock_serial_handler.py
 import time
 
 class MockSerialHandler:
@@ -9,66 +10,103 @@ class MockSerialHandler:
         print("[MockSerial] Initialized Mock Handler.")
 
     def list_ports(self):
-        """Returns dummy ports for simulation."""
         print("[MockSerial] Listing dummy ports.")
         return ["SIM_PORT_A", "/dev/tty.mockusb"]
 
     def connect(self, port, baudrate=9600, timeout=1):
-        """Simulates connecting."""
         print(f"[MockSerial] Simulating connection to {port} at {baudrate} baud.")
         self._is_connected = True
-        # Simulate a potential welcome message or status from the robot on connect
+        # Simulate initial messages, add them to buffer but don't print RX yet
         self.receive_buffer.append("Scorbot Mock Interface Ready.")
         self.receive_buffer.append("OK")
         return True
 
     def disconnect(self):
-        """Simulates disconnecting."""
         print("[MockSerial] Simulating disconnection.")
         self._is_connected = False
-        self.receive_buffer = [] # Clear buffer on disconnect
+        self.receive_buffer = []
 
     def send_command(self, command):
-        """Simulates sending a command; prints it and adds a mock response."""
         if not self._is_connected:
             print("[MockSerial] ERROR: Cannot send command, not connected.")
             return False
+        # --- CHANGED: Use consistent TX prefix ---
+        print(f"--> [SERIAL_TX]: {command}")
+        self.last_sent_command = command.upper()
 
-        print(f"[SIMULATED_SERIAL_TX]: {command}")
-        self.last_sent_command = command.upper() # Store uppercase for easier matching
-
-        # --- Add basic mock responses based on command ---
-        # Make this more sophisticated as needed for your tests
+        # --- Add basic mock responses ---
         time.sleep(0.1) # Simulate processing delay
         if "HOME" in self.last_sent_command:
-            self.receive_buffer.append("Executing HOME...") # Simulate intermediate msg
-            time.sleep(0.5) # Simulate movement time
-            self.receive_buffer.append("OK") # Simulate simple acknowledgement
-        elif "STATUS" in self.last_sent_command or "WHERE" in self.last_sent_command:
-             # Simulate position response (adjust format if needed)
-             self.receive_buffer.append("POSITION: 100.0 50.5 -20.0 90.0 0.0")
+             # Check the explicit instruction: wait for "Homing complete(robot)"
+             if self.last_sent_command == "HOME":
+                self.receive_buffer.append("Executing HOME...")
+                time.sleep(1.5) # Simulate homing time
+                self.receive_buffer.append("Axis 1 homed.")
+                self.receive_buffer.append("Axis 2 homed.")
+                self.receive_buffer.append("Axis 3 homed.")
+                self.receive_buffer.append("Axis 4 homed.")
+                self.receive_buffer.append("Axis 5 homed.")
+                self.receive_buffer.append("Homing complete(robot)") # Specific message from prompt
+             else: # Other commands containing "HOME" (unlikely?)
+                 self.receive_buffer.append("OK")
+        elif "LISTPV POSITION" in self.last_sent_command:
+            self.receive_buffer.append("Position POSITION :")
+            self.receive_buffer.append("Axis 1 = 12345 counts")
+            self.receive_buffer.append("Axis 2 = -5678 counts")
+            self.receive_buffer.append("Axis 3 = 9012 counts")
+            self.receive_buffer.append("Axis 4 = 3456 counts")
+            self.receive_buffer.append("Axis 5 = -7890 counts")
+            self.receive_buffer.append("OK")
+        elif "DEFP" in self.last_sent_command:
              self.receive_buffer.append("OK")
+        elif "SETPV" in self.last_sent_command: # Assume prompting mode for simulation
+             self.receive_buffer.append("Enter Axis 1 value:") # Simulate prompt
+             # In simulation, we can't wait for user input here, so just OK it
+             self.receive_buffer.append("OK")
+        elif "LISTPV" in self.last_sent_command: # Simulate listing a variable
+            pos_name = self.last_sent_command.split()[-1]
+            self.receive_buffer.append(f"Position {pos_name} :")
+            # Use different values than POSITION
+            self.receive_buffer.append("Axis 1 = 1000 counts")
+            self.receive_buffer.append("Axis 2 = 2000 counts")
+            self.receive_buffer.append("Axis 3 = 3000 counts")
+            self.receive_buffer.append("Axis 4 = 4000 counts")
+            self.receive_buffer.append("Axis 5 = 5000 counts")
+            self.receive_buffer.append("OK")
+        elif "EDIT" in self.last_sent_command:
+             self.receive_buffer.append("Entering EDIT mode.")
+             self.receive_buffer.append("OK") # Simple OK for simulation
+        elif "EXIT" in self.last_sent_command:
+             self.receive_buffer.append("Exiting EDIT mode.")
+             self.receive_buffer.append("OK")
+        elif "RUN" in self.last_sent_command:
+            self.receive_buffer.append("Running program...")
+            time.sleep(1.0) # Simulate program execution
+            self.receive_buffer.append("Program complete.")
+            self.receive_buffer.append("OK")
         elif "SPEED" in self.last_sent_command:
             self.receive_buffer.append("OK")
-        elif "MOVE" in self.last_sent_command or "GOTO" in self.last_sent_command:
+        elif "MOVED" in self.last_sent_command or "MOVELD" in self.last_sent_command:
              self.receive_buffer.append("Executing move...")
-             time.sleep(0.4)
+             time.sleep(0.8)
+             self.receive_buffer.append("Move complete.") # More specific message
+             self.receive_buffer.append("OK")
+        elif "STATUS" in self.last_sent_command or "WHERE" in self.last_sent_command:
+             self.receive_buffer.append("STATUS: Ready, Speed=50, Pos=(Simulated)")
              self.receive_buffer.append("OK")
         elif "OPEN" in self.last_sent_command or "CLOSE" in self.last_sent_command:
             self.receive_buffer.append("OK")
         else:
-            # Default response for unrecognized mock commands
             self.receive_buffer.append("ERROR: Unknown command in mock")
-            # self.receive_buffer.append("OK") # Or just OK everything
 
         return True
 
     def get_received_line(self):
-        """Gets a simulated received line from the buffer (FIFO)."""
+        """Gets a simulated received line, printing it with RX prefix."""
         if self.receive_buffer:
             line = self.receive_buffer.pop(0)
-            # Simulate receiving by printing it here when polled by main loop
-            # print(f"[SIMULATED_SERIAL_RX]: {line}") # Optional: print when retrieved
+            # --- CHANGED: Print using the standard prefix when retrieved ---
+            print(f"<-- [SERIAL_RX]: {line}")
             return line
         return None
 
