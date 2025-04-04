@@ -1,3 +1,6 @@
+Okay, here is the complete `main.py` file with the syntax error corrected in the async message draining section.
+
+```python
 # main.py
 import time
 import os
@@ -491,3 +494,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
