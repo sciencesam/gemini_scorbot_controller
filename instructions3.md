@@ -1,3 +1,170 @@
+Okay, this is a great refinement goal. We want the program to act more like an intelligent agent, handling the back-and-forth of specific command sequences (like `LISTPV` followed by `SETPV`) and ensuring Gemini gets a complete picture of the interaction for better decision-making.
+
+We'll implement **Option D** discussed in the thought process: The program will store the results from `LISTPV POSITION` and automatically use those values when Gemini asks to run `SETPV <name>` in prompting mode.
+
+Here's the plan:
+
+1.  **Introduce State:** Add a dictionary in `main.py` to hold the last known joint values.
+2.  **Parse `LISTPV`:** Enhance `wait_for_serial_response` to specifically parse the output of `LISTPV POSITION` and store the values in our state dictionary.
+3.  **Intercept and Handle `SETPV`:** Create a new function `handle_setpv_interactive` that manages the prompt-response sequence for `SETPV`, using the stored joint values.
+4.  **Modify Main Loop:** Call the appropriate handler (`handle_setpv_interactive` or the standard `wait_for_serial_response`) based on the command Gemini sends.
+5.  **Ensure Full Feedback:** Make sure the summary of the `SETPV` interaction (including values sent) is returned to Gemini.
+6.  **Update Mock Handler:** Improve the mock handler to simulate these interactions more accurately.
+
+Let's modify the code:
+
+**1. Update `mock_serial_handler.py`**
+
+Make the mock handler simulate the `LISTPV POSITION` output format and the `SETPV` prompting sequence realistically.
+
+```python
+# mock_serial_handler.py
+import time
+import re # Import regex
+
+class MockSerialHandler:
+    """A mock version of SerialHandler for testing without hardware."""
+    def __init__(self):
+        self._is_connected = False
+        self.receive_buffer = [] # Simulate received lines
+        self.last_sent_command = None
+        # Simulate some initial state for LISTPV
+        self.mock_joint_values = [1111, -2222, 3333, -4444, 5555]
+        print("[MockSerial] Initialized Mock Handler.")
+
+    def list_ports(self):
+        print("[MockSerial] Listing dummy ports.")
+        return ["SIM_PORT_A", "/dev/tty.mockusb"]
+
+    def connect(self, port, baudrate=9600, timeout=1):
+        print(f"[MockSerial] Simulating connection to {port} at {baudrate} baud.")
+        self._is_connected = True
+        self.receive_buffer.append("Scorbot Mock Interface Ready.")
+        self.receive_buffer.append("OK") # Simulate prompt/OK
+        return True
+
+    def disconnect(self):
+        print("[MockSerial] Simulating disconnection.")
+        self._is_connected = False
+        self.receive_buffer = []
+
+    def send_command(self, command):
+        if not self._is_connected:
+            print("[MockSerial] ERROR: Cannot send command, not connected.")
+            return False
+
+        print(f"--> [SERIAL_TX]: {command}")
+        self.last_sent_command = command.upper()
+        command_parts = command.split() # Split command for parsing
+        base_command = command_parts[0].upper()
+
+        # --- Simulate Responses ---
+        time.sleep(0.1)
+
+        if base_command == "HOME":
+             self.receive_buffer.append("Executing HOME...")
+             time.sleep(1.0) # Shorten simulation time
+             self.receive_buffer.append("Axis 1 homed.")
+             self.receive_buffer.append("Axis 2 homed.")
+             self.receive_buffer.append("Axis 3 homed.")
+             self.receive_buffer.append("Axis 4 homed.")
+             self.receive_buffer.append("Axis 5 homed.")
+             self.receive_buffer.append("Homing complete(robot)")
+             self.receive_buffer.append("OK") # Add OK after homing complete
+
+        elif base_command == "LISTPV" and len(command_parts) > 1 and command_parts[1].upper() == "POSITION":
+            # Simulate LISTPV POSITION output
+            self.receive_buffer.append("Position POSITION :")
+            for i, val in enumerate(self.mock_joint_values):
+                 self.receive_buffer.append(f"Axis {i+1} = {val} counts")
+            self.receive_buffer.append("OK")
+
+        elif base_command == "LISTPV" and len(command_parts) > 1:
+             pos_name = command_parts[1] # Keep original case
+             # Simulate listing a variable with slightly different values
+             self.receive_buffer.append(f"Position {pos_name} :")
+             self.receive_buffer.append("Axis 1 = 1000 counts")
+             self.receive_buffer.append("Axis 2 = 2000 counts")
+             self.receive_buffer.append("Axis 3 = 3000 counts")
+             self.receive_buffer.append("Axis 4 = 4000 counts")
+             self.receive_buffer.append("Axis 5 = 5000 counts")
+             self.receive_buffer.append("OK")
+
+        elif base_command == "DEFP":
+             # DEFP itself is usually just OK
+             self.receive_buffer.append("OK")
+
+        elif base_command == "SETPV" and len(command_parts) > 1:
+            # SETPV <name> enters prompting mode
+            pos_name = command_parts[1]
+            print(f"[MockSerial] Simulating SETPV prompting for '{pos_name}'")
+            # Add the prompts to the buffer - the main loop will handle reading them
+            for i in range(5):
+                self.receive_buffer.append(f"Enter Axis {i+1} value:")
+            # Add the final confirmation after all prompts *would* have been answered
+            self.receive_buffer.append("OK")
+
+        elif base_command == "EDIT":
+             self.receive_buffer.append("Entering EDIT mode.")
+             self.receive_buffer.append("OK")
+        elif base_command == "EXIT":
+             self.receive_buffer.append("Exiting EDIT mode.")
+             self.receive_buffer.append("OK")
+        elif base_command == "RUN":
+            self.receive_buffer.append("Running program...")
+            time.sleep(0.5)
+            self.receive_buffer.append("Program complete.")
+            self.receive_buffer.append("OK")
+        elif base_command == "SPEED":
+            self.receive_buffer.append("OK")
+        elif base_command == "MOVED" or base_command == "MOVELD":
+             self.receive_buffer.append("Executing move...")
+             time.sleep(0.5)
+             # Simulate changing the internal position for subsequent LISTPV
+             self.mock_joint_values = [v + 100 for v in self.mock_joint_values]
+             self.receive_buffer.append("Move complete.")
+             self.receive_buffer.append("OK")
+        elif base_command == "STATUS" or base_command == "WHERE":
+             self.receive_buffer.append("STATUS: Ready, Speed=50, Pos=(Simulated)")
+             self.receive_buffer.append("OK")
+        elif base_command == "OPEN" or base_command == "CLOSE":
+            self.receive_buffer.append("OK")
+        else:
+            self.receive_buffer.append("ERROR: Unknown command in mock")
+
+        return True
+
+    # --- send_value (New method for interactive SETPV simulation) ---
+    def send_value(self, value_str):
+        """ Simulates the program sending a value during SETPV """
+        if not self._is_connected: return False
+        # The robot wouldn't echo the value, just proceed.
+        # We just need to print it for clarity in the simulation log.
+        print(f"--> [SIMULATED_VALUE_TX]: {value_str}")
+        # Update mock position state if desired, but primary purpose
+        # is just to acknowledge the value was "sent"
+        return True
+
+
+    def get_received_line(self):
+        """Gets a simulated received line, printing it with RX prefix."""
+        if self.receive_buffer:
+            line = self.receive_buffer.pop(0)
+            print(f"<-- [SERIAL_RX]: {line}")
+            return line
+        return None
+
+    def get_buffer_snapshot(self):
+         return list(self.receive_buffer)
+
+    def is_connected(self):
+        return self._is_connected
+
+```
+
+**2. Modify `main.py`**
+
+```python
 # main.py
 import time
 import os
@@ -479,3 +646,32 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
+
+**Key Changes Recap:**
+
+1.  **`current_robot_state` Dictionary:** Added globally in `main.py` to hold `'last_joint_values'`.
+2.  **`listpv_axis_regex` & `parse_listpv_response()`:** Added to specifically find and extract the 5 axis values from `LISTPV POSITION` output and update `current_robot_state`.
+3.  **`wait_for_serial_response()` Updated:** Now calls `parse_listpv_response()` if the command was `LISTPV POSITION` and includes parsing success/failure notes in the summary sent to Gemini.
+4.  **`handle_setpv_interactive()` Function:** This new function manages the `SETPV <name>` interaction:
+    *   Checks `current_robot_state` for valid joint values.
+    *   Sends the `SETPV` command.
+    *   Loops, waiting for each `Enter Axis X value:` prompt.
+    *   Sends the corresponding stored value.
+    *   Waits for the final `OK`.
+    *   Constructs a detailed log/summary of the entire interaction (success or failure steps) to be sent back to Gemini.
+5.  **Main Loop Logic:** Checks if `serial_cmd_from_gemini` is `SETPV`. If yes, it calls `handle_setpv_interactive`; otherwise, it calls the original `send_command` + `wait_for_serial_response`. The result from *either* handler populates `next_gemini_input['serial_response']`.
+6.  **Mock Handler:** Updated to produce realistic `LISTPV POSITION` output and the sequence of `SETPV` prompts, plus a `send_value` method for logging during simulation.
+
+Now, when Gemini follows the "reliable workflow":
+
+1.  Gemini asks to run `LISTPV POSITION`.
+2.  `main.py` runs it, `wait_for_serial_response` collects the output and `parse_listpv_response` stores the values (e.g., `[123, 456, 789, ...]`) in `current_robot_state`. The summary sent back to Gemini includes the raw output *and* a note confirming the values were stored.
+3.  Gemini asks to run `DEFP MYPOS`.
+4.  `main.py` runs it, gets "OK", sends that back.
+5.  Gemini asks to run `SETPV MYPOS`.
+6.  `main.py` detects `SETPV`, calls `handle_setpv_interactive`.
+7.  `handle_setpv_interactive` checks `current_robot_state`, finds the values `[123, 456, ...]`.
+8.  It sends `SETPV MYPOS`. Waits for "Enter Axis 1 value:", sends "123". Waits for "Enter Axis 2 value:", sends "456", etc. Waits for "OK".
+9.  It packages a summary like "[SETPV Interaction... Sent value 123 for Axis 1... Sent value 456 for Axis 2... Received final 'OK']" into `next_gemini_input`.
+10. Gemini receives this summary, confirming the operation succeeded using the intended data.
