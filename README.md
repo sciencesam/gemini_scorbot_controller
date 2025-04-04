@@ -55,7 +55,7 @@ gemini_scorbot_controller/
     *   Python 3.7 or newer
     *   `pip` (Python package installer)
     *   Git (optional, for cloning)
-    *   Serial port drivers for your USB adapter (if needed for your OS)
+    *   Serial port drivers for your USB adapter
 *   **API Key:**
     *   A Google AI API Key (obtainable from [Google AI Studio](https://aistudio.google.com/))
 
@@ -63,7 +63,7 @@ gemini_scorbot_controller/
 
 1.  **Clone or Download:**
     ```bash
-    git clone <your-repo-url> # If using Git
+    git clone git@github.com:sciencesam/gemini_scorbot_controller.git
     cd gemini_scorbot_controller
     ```
     Or download the files into a `gemini_scorbot_controller` directory.
