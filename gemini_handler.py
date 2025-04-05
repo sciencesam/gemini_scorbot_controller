@@ -16,10 +16,11 @@ except KeyError:
 MODEL_NAME = 'gemini-1.5-pro-latest'
 
 class GeminiHandler:
-    def __init__(self, initial_prompt_text, manual_path=None):
+    def __init__(self, initial_prompt_text, manual_path=None,user_manual_path=None):
         """Initializes the Gemini Handler with the model and initial context."""
         self.model = genai.GenerativeModel(MODEL_NAME)
         self.uploaded_manual = None # Store reference to uploaded file object
+        self.uploaded_user_manual = None # Store reference to uploaded file object
 
         # --- Upload Manual if provided ---
         if manual_path and os.path.exists(manual_path):
@@ -39,6 +40,24 @@ class GeminiHandler:
         elif manual_path:
             print(f"Warning: Manual file not found at {manual_path}. Proceeding without it.")
 
+        # --- Upload User Manual if provided ---
+        if user_manual_path and os.path.exists(user_manual_path):
+            print(f"Uploading user manual: {user_manual_path}...")
+            try:
+                # Give it a display name Gemini can potentially reference
+                user_manual_file = genai.upload_file(path=user_manual_path,
+                                                display_name="Scorbot ACL Reference Manual")
+                print(f"Manual uploaded successfully. File Name: {user_manual_file.name}") # Use .name
+                self.uploaded_user_manual = user_manual_file
+                # Optional: Add check for file state if needed, but usually okay
+                # time.sleep(2) # Small delay if issues occur
+            except Exception as e:
+                print(f"Error uploading user manual {user_manual_path}: {e}")
+                print("Proceeding without uploaded manual reference in initial context.")
+                self.uploaded_user_manual = None
+        elif user_manual_path:
+            print(f"Warning: User Manual file not found at {user_manual_path}. Proceeding without it.")
+
         # --- Prepare Initial Chat History ---
         initial_history = []
         initial_user_parts = [initial_prompt_text] # Start with the prompt text
@@ -48,6 +67,10 @@ class GeminiHandler:
         if self.uploaded_manual:
             initial_user_parts.append(self.uploaded_manual)
             print("Reference to uploaded manual added to initial user message.")
+
+        if self.uploaded_user_manual:
+            initial_user_parts.append(self.uploaded_user_manual)
+            print("Reference to uploaded user manual added to initial user message.")
 
         # Add the complete initial user message (prompt + maybe file)
         initial_history.append({'role': 'user', 'parts': initial_user_parts})

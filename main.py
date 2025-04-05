@@ -14,6 +14,7 @@ from camera_handler import CameraHandler
 # --- Configuration Constants ---
 INITIAL_PROMPT_FILE_DEFAULT = "initial_prompt.txt"
 SCORBOT_MANUAL_PATH_DEFAULT = "scorbot_acl_manual.pdf"
+SCORBOT_USER_MANUAL_PATH_DEFAULT = "ER_VII_100017.pdf"
 IMAGE_CAPTURE_DIR = "captures"
 SERIAL_RESPONSE_TIMEOUT = 90.0 # Max seconds overall
 SERIAL_INTER_MESSAGE_TIMEOUT = 1.5 # Max seconds between lines
@@ -289,7 +290,8 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument('--simulate', action='store_true', help="Run in simulation mode.")
-    parser.add_argument('--manual', type=str, default=SCORBOT_MANUAL_PATH_DEFAULT, help="Path to the Scorbot manual file.")
+    parser.add_argument('--manual', type=str, default=SCORBOT_MANUAL_PATH_DEFAULT, help="Path to the Scorbot ACL manual file.")
+    parser.add_argument('--user_manual', type=str, default=SCORBOT_USER_MANUAL_PATH_DEFAULT, help="Path to the Scorbot user manual file.")
     parser.add_argument('--prompt', type=str, default=INITIAL_PROMPT_FILE_DEFAULT, help="Path to the initial prompt file.")
     parser.add_argument('--baud', type=int, default=9600, help="Baud rate for serial connection.")
     parser.add_argument('--port', type=str, default=None, help="Specify serial port directly.")
@@ -311,9 +313,10 @@ def main():
         with open(args.prompt, 'r') as f: initial_prompt = f.read()
     except FileNotFoundError: print(f"FATAL ERROR: Initial prompt file '{args.prompt}' not found."); sys.exit(1)
     if args.manual and not os.path.exists(args.manual): print(f"Warning: Manual file '{args.manual}' not found.")
+    if args.manual and not os.path.exists(args.user_manual): print(f"Warning: User Manual file '{args.user_manual}' not found.")
     print("Initializing Gemini Handler...")
     try:
-        gemini = GeminiHandler(initial_prompt, manual_path=args.manual)
+        gemini = GeminiHandler(initial_prompt, manual_path=args.manual,user_manual_path=args.user_manual)
     except Exception as e: print(f"FATAL ERROR: Failed to initialize Gemini Handler: {e}"); sys.exit(1)
 
     # Camera setup
